@@ -1,0 +1,397 @@
+[include shell_command.cfg]
+# For the ZNP Robin Nano DW v2.1 board:
+#   - Compile with the processor model STM32F401.
+#   - Select the 32KiB bootloader,
+#   - Select (Serial (on # USART1 PA10/PA9) for the communication interface.
+# Note that the "make flash" command does not work with ZNP Robin boards. After
+# running "make", run the following command:
+# cp out/klipper.bin out/ZNP_ROBIN_NANO.bin
+#
+# Copy the file out/ZNP_ROBIN_NANO.bin to an SD card and then restart the printer with
+# that SD card.
+# See docs/Config_Reference.md for a description of parameters.
+
+[include mainsail.cfg]
+[include macros.cfg]
+[include timelapse.cfg]
+[exclude_object]
+[include adxl.cfg]
+[include reshelper.cfg]
+#[include Eddy.cfg]                            ####### Tag out ALL KAMP when using this! as a full bed mesh is better than just adaptive meshing
+[include KAMP_Settings.cfg]
+### The following [includes] can be uncommented from within KAMP_Settings.cfg. ###
+# This file enables the use of adaptive meshing.
+[include ./KAMP/Adaptive_Meshing.cfg]
+[include Line_Purge.cfg]
+[mcu host]
+serial: /tmp/klipper_host_mcu
+
+[mcu]
+#serial: /dev/serial/by-id/usb-1a86_USB_Serial-if00-port0
+#serial: /dev/ttyAMA0
+#serial: /dev/ttyprintk
+#serial: /dev/ttyS0
+#serial: /dev/ttyS1
+serial: /dev/ttyUSB0
+#serial: /
+restart_method: command
+
+[printer]
+kinematics: cartesian
+max_velocity: 500 #30 #500
+max_accel: 3000 #100 #3000
+max_z_velocity: 80 ##100 #30 #50 - ANY HIGHER THAN 80 VELOCITY & 100 ACCEL RESULTS IN ERRATIC HOMING BEHAVIOUR!
+max_z_accel: 100 ##150 #200
+
+[duplicate_pin_override]
+pins: PC7, PC8, PC9, PC14 #Reuse Z-Stepper pins to drive the stepper manually and Z-Max Sensor pin
+
+[stepper_x]
+step_pin: !PC12
+dir_pin: PB3
+enable_pin: !PD2
+microsteps: 16
+rotation_distance: 40
+endstop_pin: PA13
+position_endstop: 0
+position_max: 233
+homing_speed: 100
+
+[stepper_y]
+step_pin: PC11
+dir_pin: PA15
+enable_pin: !PC10
+microsteps: 16
+rotation_distance: 40
+endstop_pin: PB8
+position_endstop: 0
+position_max: 233
+homing_speed: 100
+
+[stepper_z]
+step_pin: PC7
+dir_pin: !PC9
+enable_pin: !PC8
+rotation_distance: 8
+microsteps: 16
+endstop_pin: probe:z_virtual_endstop # Use Z- as endstop
+#Alternative homing config is available at @bsas fork https://github.com/bsas/Neptune-Elegoo3-Klipper
+position_min: -2
+position_max: 265 #280 #285
+homing_speed: 1 #1
+second_homing_speed: 1 #0.6 #1
+homing_retract_dist: 1.0
+
+#Redefine Z-stepper so it can be driven independently using Klipper's Manual Stepper Gcode and Z-Max sensor can be used to stop the movement
+[manual_stepper z-max]
+step_pin: PC7
+dir_pin: !PC9
+enable_pin: !PC8
+rotation_distance: 8
+microsteps: 16
+endstop_pin: !PC14
+
+#Workaround to get the status of Z-Max optical sensor
+[filament_switch_sensor z-max]
+pause_on_runout: False
+switch_pin: !PC14 
+
+[homing_override]
+axes: xyz
+set_position_z: 0 #Temporary set Z as 0 so X and Y can be moved after XY homing
+gcode:
+ {% if printer["filament_switch_sensor z-max"].filament_detected == True %} #If Z-Max sensor is triggered, move Z up to advoid scratching Bed 
+ MANUAL_STEPPER STEPPER=z-max SET_POSITION=0 SPEED=10 MOVE=5 STOP_ON_ENDSTOP=0 SYNC=0 #Move Z-Stepper using [manual_stepper] Gcode
+ MANUAL_STEPPER STEPPER=z-max ENABLE=0
+ G28 X10 Y10 #Home XY
+ G0 X7.5 Y117.5 F3000 #G0 X117.5 Y117.5 F4000 #Move XY to the middle
+ G28 Z0 #Home Z
+ G0 Z10 F80 #Move Z Up
+ {% else %}
+ #As above
+ G28 X10 Y10
+ G0 X7.5 Y117.5 F3000
+ #At speed of 250mm/s, this movement will take ~12 seconds regardless of Z-Max Sensor status. (E.g. When sensor is triggered, Z will stop, however it will wait till the code is complete which is ~12s)
+ #The movement is quite loud at this speed, you can reduce the speed thus increase waiting time. 
+ MANUAL_STEPPER STEPPER=z-max ENABLE=1 SET_POSITION=265 SPEED=25 MOVE=0 STOP_ON_ENDSTOP=1 SYNC=0 
+ MANUAL_STEPPER STEPPER=z-max ENABLE=0
+ G28 Z0
+ G0 Z10 F80
+ {% endif %}
+
+[extruder]
+max_extrude_cross_section: 5
+max_extrude_only_distance: 110.0
+step_pin: PB10
+dir_pin: PB1
+enable_pin: !PC6
+microsteps: 16
+rotation_distance: 21.9 # 21.9 # OLD_VALUE 22.7 # Calibrate E-Steps https://www.klipper3d.org/Rotation_Distance.html#calibrating-rotation_distance-on-extruders
+nozzle_diameter: 0.400
+filament_diameter: 1.750
+heater_pin: PA6
+sensor_type: EPCOS 100K B57560G104F
+sensor_pin: PC1
+# Calibrate PID: https://www.klipper3d.org/Config_checks.html#calibrate-pid-settings
+#control: pid
+#pid_kp = 28.631
+#pid_ki = 1.853
+#pid_kd = 110.589
+min_temp: 0
+max_temp: 350
+pressure_advance: 0.075 #0.045 #0.025 #0.084
+pressure_advance_smooth_time: 0.04 #0.04
+#pressure_advance: 0.19
+
+[heater_bed]
+heater_pin: PA5
+sensor_type: EPCOS 100K B57560G104F
+sensor_pin: PC0
+max_temp: 120
+min_temp: 0
+#control: watermark
+
+[heater_fan hotend_fan]
+pin: PA7
+heater: extruder
+heater_temp: 50.0
+
+[fan]
+pin: PB0
+
+[temperature_sensor Raspberry_Pi_4b]
+sensor_type: temperature_host
+
+[temperature_sensor Elegoo_Neptune_3]
+sensor_type: temperature_mcu
+sensor_temperature1: 25
+sensor_adc1: 0.210317
+
+#[temperature_fan Pi_Fan]
+#pin: 26
+#control: watermark
+#max_delta: 3.0
+#sensor_type: temperature_host
+#min_temp: 0
+#max_temp: 80
+#target_temp: 70
+
+[force_move]
+enable_force_move: True
+
+# Safe Z Home doesn't work with homing overide, the config below are implemented in homing_overide section
+#[safe_z_home]
+#home_xy_position: 110,110
+#z_hop: 10
+
+[probe]
+pin: !PC13 # Use Z- as endstop
+speed: 1 # 0.3
+lift_speed: 2 # 0.9
+samples_tolerance: 0.3 # 0.1
+samples_tolerance_retries: 2
+samples: 2
+samples_result: median
+#z_offset = 0
+# z_offset = 0
+activate_gcode:
+	TARE_PROBE
+
+[gcode_macro TARE_PROBE]
+gcode:
+	{action_respond_info("Wait")}
+    G4 P1000
+	{action_respond_info("Start")}
+
+[bed_mesh]
+speed: 250
+horizontal_move_z: 2
+algorithm: bicubic
+mesh_min: 10,10
+mesh_max: 220,220
+probe_count: 8,8
+fade_start: 1
+fade_end: 10
+fade_target: 0
+#relative_reference_index: 6
+#mesh_pps: 1
+bicubic_tension: 0.15
+
+[firmware_retraction]
+retract_length: 6
+#   The length of filament (in mm) to retract when G10 is activated,
+#   and to unretract when G11 is activated (but see
+#   unretract_extra_length below). The default is 0 mm.
+retract_speed: 120
+#   The speed of retraction, in mm/s. The default is 20 mm/s.
+#unretract_extra_length: 0
+#   The length (in mm) of *additional* filament to add when
+#   unretracting.
+unretract_speed: 110
+#   The speed of unretraction, in mm/s. The default is 10 mm/s.
+
+#[filament_motion_sensor filament_sensor]
+#extruder: extruder
+#pause_on_runout: false
+#switch_pin: PB4
+
+#Input Shaper Setup
+
+#[mcu rpi]
+#serial: /tmp/klipper_host_mcu
+
+#[adxl345]
+#cs_pin: rpi:None
+
+#[resonance_tester]
+#accel_chip: adxl345
+#probe_points:
+#    110, 110, 20  # an example
+
+[input_shaper]
+#shaper_freq_x: 142.4
+#shaper_type_x: 2hump_ei
+#shaper_freq_y: 33.4
+#shaper_type_y: ei
+
+# ----------------------------------------------------------------------------------------------
+#           ************ Recent Changes by Bevan 1/11/23 ****************
+# ----------------------------------------------------------------------------------------------
+
+[gcode_macro M420]
+description: Load the current mesh
+gcode:
+    BED_MESH_PROFILE LOAD=default
+
+[gcode_macro G29]
+description: creates automated homing and bed mesh
+gcode:
+      G28
+    BED_MESH_CALIBRATE ADAPTIVE=1 #BED_MESH_CALIBRATE
+    BED_MESH_PROFILE SAVE=default
+    #  DATA_SAVE
+
+# ---------------------------------------------------------------------------------------------
+
+[gcode_macro START_PRINT] 
+gcode: 
+#    SET_PIN PIN=HeadLight VALUE=1
+    BED_MESH_CLEAR
+    M84
+    G92
+    {% set BED_TEMP = params.BED_TEMP|float %}
+    {% set EXTRUDER_TEMP = params.EXTRUDER_TEMP|float %}    
+#    {% set BED_TEMP = params.BED_TEMP|default(60)|float %}
+#    {% set EXTRUDER_TEMP = params.EXTRUDER_TEMP|default(190)|float %}
+    # Heat nozzle for probing
+    M104 S{EXTRUDER_TEMP}
+    # Heat bed for probing
+    M190 S{BED_TEMP}
+    # Use absolute coordinates 
+    G90 
+    # Home the printer 
+    G29 #- Home the printer and bed mesh #G28 
+    # Reset extruder 
+    G92 E0
+#   # Heat the bed and wait
+#   M190 S80
+
+    M420 # BED_MESH_PROFILE LOAD=default
+
+    # Move to wait position 
+    G1 X0 Y0 Z50 F1500.0  
+     # Set and wait for nozzle to reach temperature 
+     M109 S{EXTRUDER_TEMP}
+    # Move Z axis up 
+    G1 Z2.0 F1500 
+   ###  # Move to start position 
+   ###  G1 X1.1 Y20 Z0.28 F1500.0 
+   ### # Draw the first line
+   ### G1 X1.1 Y200.0 Z0.28 F1500.0 E15 
+   ###  # Move to the side
+   ###  G1 X1.4 Y200.0 Z0.28 F1500.0 
+   ### # Draw the second line 
+   ### G1 X1.4 Y20 Z0.28 F1500.0 E30 
+     # Reset extruder 
+     G92 E0
+  LINE_PURGE
+
+  
+# ----------------------------------------------------------------------------------------------
+#           ************ Recent Changes by Bevan 10/2/24 ****************
+# ----------------------------------------------------------------------------------------------
+
+# **************************** RELAYS *********************************
+  
+[output_pin pin21-1]
+pin: !host:gpio21
+[gcode_macro PIN21]
+gcode:
+  SET_PIN PIN=pin21 VALUE={(not printer['output_pin pin21'].value)|int}
+
+[output_pin pin20-2]
+pin: !host:gpio20
+[gcode_macro PIN20]
+gcode:
+  SET_PIN PIN=pin20 VALUE={(not printer['output_pin pin20'].value)|int}
+
+[output_pin HeadLight]
+pin: !host:gpio26
+[gcode_macro HeadLight]
+gcode:
+  SET_PIN PIN=pin26 VALUE={(not printer['output_pin pin26'].value)|int}
+[gcode_macro HeadLight_ON]
+gcode: SET_PIN PIN=HeadLight VALUE=1
+[gcode_macro HeadLight_OFF]
+gcode: SET_PIN PIN=HeadLight VALUE=0
+
+[output_pin Chamber]
+pin: !host:gpio19
+[gcode_macro Chamber]
+gcode:
+  SET_PIN PIN=pin19 VALUE={(not printer['output_pin pin19'].value)|int}
+[gcode_macro Chamber_ON]
+gcode: SET_PIN PIN=Chamber VALUE=1
+[gcode_macro Chamber_OFF]
+gcode: SET_PIN PIN=Chamber VALUE=0
+
+#*# <---------------------- SAVE_CONFIG ---------------------->
+#*# DO NOT EDIT THIS BLOCK OR BELOW. The contents are auto-generated.
+#*#
+#*# [probe]
+#*# z_offset = -0.281
+#*#
+#*# [extruder]
+#*# control = pid
+#*# pid_kp = 24.083
+#*# pid_ki = 1.655
+#*# pid_kd = 87.603
+#*#
+#*# [heater_bed]
+#*# control = pid
+#*# pid_kp = 69.837
+#*# pid_ki = 1.446
+#*# pid_kd = 843.287
+#*#
+#*# [input_shaper]
+#*# shaper_type_x = mzv
+#*# shaper_freq_x = 52.6
+#*# shaper_type_y = zv
+#*# shaper_freq_y = 34.0
+#*#
+#*# [bed_mesh default]
+#*# version = 1
+#*# points =
+#*# 	  0.075000, 0.031250, 0.062500, 0.061250
+#*# 	  0.073750, 0.073750, 0.073750, 0.078750
+#*# 	  0.113750, 0.083750, 0.071250, 0.061250
+#*# x_count = 4
+#*# y_count = 3
+#*# mesh_x_pps = 2
+#*# mesh_y_pps = 2
+#*# algo = lagrange
+#*# tension = 0.15
+#*# min_x = 94.9624
+#*# max_x = 155.0224
+#*# min_y = 108.764
+#*# max_y = 141.224
